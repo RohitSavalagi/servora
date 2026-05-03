@@ -1,5 +1,8 @@
-import express, { Request, response, Response } from "express";
-import { sendEmailController } from "../controllers/auth.controller";
+import express, { Request, Response } from "express";
+import {
+  sendEmailController,
+  signUpController,
+} from "../controllers/auth.controller";
 
 export const router = express.Router();
 
@@ -8,6 +11,7 @@ router.get("/", (req: Request, res: Response) => {
   res.send("auth service running successfully");
 });
 
-router.post("/signUp", sendEmailController);
+router.post("/send-mail-auth", sendEmailController);
+router.post("/signUp", signUpController);
 
 export default router;
