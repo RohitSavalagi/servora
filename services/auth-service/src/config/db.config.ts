@@ -1,11 +1,11 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 
+dotenv.config();
+
 export const dbConnect = async () => {
   try {
-    const mongodbUrl =
-      process.env.MONGODB_URL ||
-      "mongodb+srv://rohitsavalagi70_db_user:80cj15vO4asFAsja@authcluster.ezantmn.mongodb.net/ServoraAuthDatabase";
+    const mongodbUrl = process.env.MONGODB_URL;
 
     if (!mongodbUrl) {
       console.log("db uri is not provided");
