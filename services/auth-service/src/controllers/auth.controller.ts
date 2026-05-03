@@ -6,28 +6,31 @@ import { ApiResponse } from "../types/api-response.types";
 
 export const sendEmailController = async (req: Request, res: Response) => {
   try {
-    const { fullName, email, password, role } = req.body as IUser;
+    // fetch data
+    const { fullName, email, password, role } = req.body;
 
+    // validation
     if (!fullName || !email || !password || !role) {
       throw new AppError(400, "Please fill all the input fields");
     }
 
     if (password.length < 8) {
-      throw new AppError(422, "Password is too short");
+      throw new AppError(422, "password is too short");
     }
 
-    const newOtp = await sendEmailService({ fullName, email, password, role });
+    // service call
+    const newOtp = await sendEmailService({ email });
 
     res.status(201).json({
       success: true,
-      message: "Otp sent successfully",
+      message: "Otp send successfully",
       data: newOtp,
     } as ApiResponse<typeof newOtp>);
   } catch (error: any) {
     console.log(error);
     res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Internal Server Error",
+      message: error.message || "Internal server error",
     });
   }
 };

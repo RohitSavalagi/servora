@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import router from "./routes/auth.routes";
 
 const app = express();
 
@@ -10,9 +11,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/", (req: Request, res: Response) => {
-  console.log("auth service hit");
-  res.status(200).send("auth service running successfully");
-});
+app.use("/", router);
 
 export default app;
