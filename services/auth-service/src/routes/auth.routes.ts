@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { Response } from "express";
 import {
   forgotPasswordController,
   forgotPasswordVerifyOtpController,
@@ -6,11 +6,12 @@ import {
   resetPassWordController,
   sendEmailController,
   signUpController,
+  updatePassWordController,
 } from "../controllers/auth.controller";
 
 export const router = express.Router();
 
-router.get("/", (req: Request, res: Response) => {
+router.get("/", (_, res: Response) => {
   console.log("auth service");
   res.send("auth service running successfully");
 });
@@ -21,5 +22,6 @@ router.post("/login", logInController);
 router.post("/forgot-password", forgotPasswordController);
 router.post("/forgot-password-verify-otp", forgotPasswordVerifyOtpController);
 router.post("/reset-password", resetPassWordController);
+router.post("/update-password", updatePassWordController);
 
 export default router;

@@ -26,6 +26,13 @@ interface IResetPasswordData {
   confirmPassword: string 
 }
 
+interface IUpdatePassword { 
+  userId: string, 
+  password: string, 
+  confirmPassword: string, 
+  oldPassword: string;
+}
+
 export const signUpService = async (data: ISignUpData) => {
   const { fullName, password, email, otp, role } = data;
 
@@ -189,4 +196,36 @@ export const resetPasswordService = async (data: IResetPasswordData) => {
 
   return updatedUser;
 
+}
+
+export const updatePasswordService = async (data: IUpdatePassword) => {
+  const { userId, password, confirmPassword, oldPassword } = data;
+
+  if (password !== confirmPassword) {
+    throw new AppError(422, "confirm password did not match");
+  }
+
+  if (password.length < 8) {
+    throw new AppError(422, "password length is less than 8");
+  }
+
+  const user = await User.findOne({ _id: userId });
+
+  if (!user?._id) {
+    throw new AppError(404, "Email is not registered");
+  }
+
+  const passwordMatch = await bcrypt.compare(oldPassword, user.password);
+
+  if (!passwordMatch) {
+    throw new AppError(409, "Password did not match");
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const updatedUser = await User.findOneAndUpdate({ _id: userId }, {
+    password: hashedPassword
+  }, { 'returnDocument': 'after' }).select("-password");
+
+  return updatedUser?.toObject();
 }

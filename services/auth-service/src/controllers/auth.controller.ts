@@ -3,7 +3,7 @@ import { IUser, User } from "../models/user.model";
 import { AppError } from "../utils/app.error";
 import { sendEmailService } from "../services/opt.service";
 import { ApiResponse } from "../types/api-response.types";
-import { forgotPasswordVerifyOtpService, loginService, resetPasswordService, signUpService } from "../services/auth.service";
+import { forgotPasswordVerifyOtpService, loginService, resetPasswordService, signUpService, updatePasswordService } from "../services/auth.service";
 import { forgotPasswordService } from "../services/password.service";
 
 export const sendEmailController = async (req: Request, res: Response) => {
@@ -208,5 +208,34 @@ export const resetPassWordController = async (req: Request, res: Response) => {
         success: false,
         message: error.message,
       })
+  }
+}
+
+export const updatePassWordController = async (req: Request, res: Response) => {
+  try {
+
+    const userData = JSON.parse(req.headers?.['user_id'] as string);
+
+    const userId = userData.userId;
+
+    const { password, confirmPassword, oldPassword } = req.body;
+
+    if (!userId || !password || !confirmPassword || !oldPassword) {
+      throw new AppError(400, "Please fill in all the required fields");
+    }
+
+    const callUpdatePasswordService = await updatePasswordService({ userId, password, confirmPassword, oldPassword }); 
+
+    res.status(200).json({
+      success: true,
+      message: 'Password update successful',
+      data: callUpdatePasswordService,
+    } as ApiResponse<typeof callUpdatePasswordService>);
+  } catch (error: any) {
+    console.log(error);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    })
   }
 }
