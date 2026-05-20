@@ -1,13 +1,11 @@
 import { signUpController } from "./../controllers/auth.controller";
 import { IUser, User } from "../models/user.model";
-import { Otp } from "../models/otp.model";
 import { AppError } from "../utils/app.error";
 import otp from "otp-generator";
 import axios from "axios";
 import { emailTemplate } from "../templates/email.template";
-import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import { getRedisClient } from "../config/redis.config";
 
 dotenv.config();
 
@@ -18,7 +16,6 @@ export interface IUserData {
   confirmPassword: string;
   role: "user" | "worker" | "admin";
 }
-
 
 export const sendEmailService = async (data: Partial<IUserData>) => {
   const { email } = data;
@@ -35,11 +32,11 @@ export const sendEmailService = async (data: Partial<IUserData>) => {
     specialChars: false,
   });
 
-  // save otp in db
+  // save otp in redis
 
-  const otpDoc = await Otp.create({
-    email: email,
-    otp: newOtp,
+  const client = getRedisClient();
+  await client.set(`signup_otp:${email}`, newOtp, {
+    EX: 300,
   });
 
   const body = emailTemplate(newOtp);
@@ -56,6 +53,4 @@ export const sendEmailService = async (data: Partial<IUserData>) => {
   } else {
     throw new AppError(409, "Email Body is not provided");
   }
-
-  return otpDoc;
 };

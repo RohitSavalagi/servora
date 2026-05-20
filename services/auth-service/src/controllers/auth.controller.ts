@@ -3,8 +3,15 @@ import { IUser, User } from "../models/user.model";
 import { AppError } from "../utils/app.error";
 import { sendEmailService } from "../services/opt.service";
 import { ApiResponse } from "../types/api-response.types";
-import { forgotPasswordVerifyOtpService, loginService, resetPasswordService, signUpService, updatePasswordService } from "../services/auth.service";
+import {
+  forgotPasswordVerifyOtpService,
+  loginService,
+  resetPasswordService,
+  signUpService,
+  updatePasswordService,
+} from "../services/auth.service";
 import { forgotPasswordService } from "../services/password.service";
+import { getRedisClient } from "../config/redis.config";
 
 export const sendEmailController = async (req: Request, res: Response) => {
   try {
@@ -25,13 +32,12 @@ export const sendEmailController = async (req: Request, res: Response) => {
     }
 
     // service call
-    const newOtp = await sendEmailService({ email });
+    await sendEmailService({ email });
 
     res.status(201).json({
       success: true,
       message: "Otp send successfully",
-      data: newOtp,
-    } as ApiResponse<typeof newOtp>);
+    } as ApiResponse<null>);
   } catch (error: any) {
     console.log(error);
     res.status(error.statusCode || 500).json({
@@ -75,12 +81,15 @@ export const signUpController = async (req: Request, res: Response) => {
     };
 
     res
-      .cookie("token", newUser.token, options)
+      .cookie("refreshToken", newUser.refreshToken, options)
       .status(201)
       .json({
         success: true,
         message: "New user signup Succesfully",
-        data: newUser,
+        data: {
+          ...newUser,
+          refreshToken: "",
+        },
       } as ApiResponse<typeof newUser>);
   } catch (error: any) {
     console.log(error);
@@ -96,7 +105,23 @@ export const logInController = async (req: Request, res: Response) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      throw new AppError(400, 'Please fill all the required Fields');
+      throw new AppError(400, "Please fill all the required Fields");
+    }
+
+    // redis client
+    const client = getRedisClient();
+
+    // fetch user ip address
+    const clientIpAddress = req.ip;
+    const key = `${clientIpAddress}:request_count`;
+    const requestCount = await client.incr(key);
+
+    if (requestCount === 1) {
+      await client.expire(key, 60);
+    }
+
+    if (requestCount >= 10) {
+      throw new AppError(429, "Too many requests");
     }
 
     const callLoginsService = await loginService({ email, password });
@@ -104,54 +129,57 @@ export const logInController = async (req: Request, res: Response) => {
     const cookieOption = {
       expires: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
       httpOnly: true,
-    }
+    };
 
-    return res.cookie(
-      'token', 
-      callLoginsService, 
-      cookieOption
-    ).status(200).json({
-      success: true,
-      message: "login successful",
-      data: callLoginsService,
-    } as ApiResponse<typeof callLoginsService>)
-
+    return res
+      .cookie("refreshToken", callLoginsService.refreshToken, cookieOption)
+      .status(200)
+      .json({
+        success: true,
+        message: "login successful",
+        data: {
+          ...callLoginsService,
+          refreshToken: "",
+        },
+      } as ApiResponse<typeof callLoginsService>);
   } catch (error: any) {
     console.log(error);
     res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || 'Internal server error',
-    })
+      message: error.message || "Internal server error",
+    });
   }
-}
+};
 
 export const forgotPasswordController = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
 
     if (!email) {
-      throw new AppError(400, 'Please fill in all the fields');
+      throw new AppError(400, "Please fill in all the fields");
     }
 
-    const forgotPasswordServiceCall = await forgotPasswordService({ email });
+    await forgotPasswordService({ email });
 
     res.status(201).json({
       success: true,
-      data: forgotPasswordServiceCall,
       message: "OTP sent successfully for the forgot password",
-    } as ApiResponse<typeof forgotPasswordServiceCall>);
+    } as ApiResponse<null>);
   } catch (error) {
-      console.log(error);
-      if (error instanceof AppError) {
-        res.status(error.statusCode || 5000).json({
-          success: false,
-          message: error.message || 'Internal Server Error',
-        })
-      }
+    console.log(error);
+    if (error instanceof AppError) {
+      res.status(error.statusCode || 5000).json({
+        success: false,
+        message: error.message || "Internal Server Error",
+      });
+    }
   }
-}
+};
 
-export const forgotPasswordVerifyOtpController = async (req: Request, res: Response) => {
+export const forgotPasswordVerifyOtpController = async (
+  req: Request,
+  res: Response,
+) => {
   try {
     // fetch data
     const { email, otp } = req.body;
@@ -161,7 +189,7 @@ export const forgotPasswordVerifyOtpController = async (req: Request, res: Respo
     }
 
     if (otp.length < 4) {
-      throw new AppError(400, 'Please fill the otp');
+      throw new AppError(400, "Please fill the otp");
     }
 
     // call the service
@@ -172,21 +200,20 @@ export const forgotPasswordVerifyOtpController = async (req: Request, res: Respo
       message: "Otp verified successfully",
       data: updatedUser,
     } as ApiResponse<typeof updatedUser>);
-
   } catch (error: any) {
     console.log(error);
-    
+
     res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || "Internal Server Error"
+      message: error.message || "Internal Server Error",
     });
   }
-}
+};
 
 export const resetPassWordController = async (req: Request, res: Response) => {
   try {
     const { resetToken, password, confirmPassword } = req.body;
-    
+
     if (!resetToken || !password || !confirmPassword) {
       throw new AppError(400, "Please fill in all the fields");
     }
@@ -195,26 +222,29 @@ export const resetPassWordController = async (req: Request, res: Response) => {
       throw new AppError(400, "something went wrong");
     }
 
-    const resetPassWordCall = await resetPasswordService({ resetToken, password, confirmPassword });
+    const resetPassWordCall = await resetPasswordService({
+      resetToken,
+      password,
+      confirmPassword,
+    });
 
     res.status(200).json({
       success: true,
-      message: "Password updated successfully"
+      message: "Password updated successfully",
     } as ApiResponse<null>);
   } catch (error: any) {
-      console.log(error);
+    console.log(error);
 
-      res.status(error.statusCode || 500).json({
-        success: false,
-        message: error.message,
-      })
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
   }
-}
+};
 
 export const updatePassWordController = async (req: Request, res: Response) => {
   try {
-
-    const userData = JSON.parse(req.headers?.['user_id'] as string);
+    const userData = JSON.parse(req.headers?.["user_id"] as string);
 
     const userId = userData.userId;
 
@@ -224,11 +254,16 @@ export const updatePassWordController = async (req: Request, res: Response) => {
       throw new AppError(400, "Please fill in all the required fields");
     }
 
-    const callUpdatePasswordService = await updatePasswordService({ userId, password, confirmPassword, oldPassword }); 
+    const callUpdatePasswordService = await updatePasswordService({
+      userId,
+      password,
+      confirmPassword,
+      oldPassword,
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Password update successful',
+      message: "Password update successful",
       data: callUpdatePasswordService,
     } as ApiResponse<typeof callUpdatePasswordService>);
   } catch (error: any) {
@@ -236,6 +271,6 @@ export const updatePassWordController = async (req: Request, res: Response) => {
     res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || "Internal server error",
-    })
+    });
   }
-}
+};

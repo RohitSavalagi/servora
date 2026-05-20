@@ -1,35 +1,35 @@
 import { AppError } from "../utils/app.error";
-import jwt from 'jsonwebtoken';
+import jwt from "jsonwebtoken";
 import { IUserData } from "./opt.service";
 import { User } from "../models/user.model";
-import { Otp } from "../models/otp.model";
-import crypto from 'node:crypto';
-import bcrypt from 'bcrypt';
+import crypto from "node:crypto";
+import bcrypt from "bcrypt";
+import { getRedisClient } from "../config/redis.config";
 
 interface ISignUpData extends IUserData {
   otp: string;
 }
 
 interface ILogInData {
-  email: string,
-  password: string,
+  email: string;
+  password: string;
 }
 
-interface IForgotPasswordVerifyOtpData { 
-  email: string, 
-  otp: string 
+interface IForgotPasswordVerifyOtpData {
+  email: string;
+  otp: string;
 }
 
-interface IResetPasswordData { 
-  resetToken: string, 
-  password: string, 
-  confirmPassword: string 
+interface IResetPasswordData {
+  resetToken: string;
+  password: string;
+  confirmPassword: string;
 }
 
-interface IUpdatePassword { 
-  userId: string, 
-  password: string, 
-  confirmPassword: string, 
+interface IUpdatePassword {
+  userId: string;
+  password: string;
+  confirmPassword: string;
   oldPassword: string;
 }
 
@@ -42,14 +42,15 @@ export const signUpService = async (data: ISignUpData) => {
     throw new AppError(409, "Email already registered");
   }
 
-  const latestOtp = await Otp.findOne({ email }).sort({ createdAt: -1 });
+  // ger redis client
+  const latestOtp = await getRedisClient().get(`signup_otp:${email}`);
 
   // verify
   if (!latestOtp) {
     throw new AppError(404, "Otp not found");
   }
 
-  if (latestOtp.otp !== otp) {
+  if (latestOtp !== otp) {
     throw new AppError(400, "Otp did not matched");
   }
 
@@ -72,17 +73,46 @@ export const signUpService = async (data: ISignUpData) => {
     userId: newUser.id,
   };
 
-  const JWT_SECRET = process.env.JWT_SECRET;
+  const refreshTokenPayload = {
+    userId: newUser._id,
+  };
 
-  if (!JWT_SECRET) {
+  const ACCESS_TOKEN_JWT_SECRET = process.env.ACCESS_TOKEN_JWT_SECRET;
+
+  if (!ACCESS_TOKEN_JWT_SECRET) {
     throw new AppError(500, "JWT secret is missing");
   }
 
-  const token = await jwt.sign(payload, JWT_SECRET, { expiresIn: "1y" });
+  const accessToken = await jwt.sign(payload, ACCESS_TOKEN_JWT_SECRET, {
+    expiresIn: "15min",
+  });
+
+  const REFRESH_TOKEN_JWT_SECRET = process.env.REFRESH_TOKEN_JWT_SECRET;
+
+  if (!REFRESH_TOKEN_JWT_SECRET) {
+    throw new AppError(500, "JWT REFRESH_TOKEN_JWT_SECRET secret is missing");
+  }
+
+  const refreshToken = await jwt.sign(
+    refreshTokenPayload,
+    REFRESH_TOKEN_JWT_SECRET,
+    {
+      expiresIn: "7d",
+    },
+  );
+
+  // redis client
+  const client = getRedisClient();
+
+  // save refresh token in redis
+  await client.set(`session:${newUser._id}`, refreshToken, {
+    EX: 604800,
+  });
 
   const userObj = {
     ...newUser.toObject(),
-    token: token,
+    accessToken: accessToken,
+    refreshToken: refreshToken,
     password: null,
   };
 
@@ -90,74 +120,108 @@ export const signUpService = async (data: ISignUpData) => {
 };
 
 export const loginService = async (data: ILogInData) => {
-    const { email, password } = data;
+  const { email, password } = data;
 
-    if (!email || !password) {
-      throw new AppError(400, 'Please fill all the required Fields');
-    }
+  if (!email || !password) {
+    throw new AppError(400, "Please fill all the required Fields");
+  }
 
-    const user = await User.findOne({ email });
+  const user = await User.findOne({ email });
 
-    if (!user) {
-      throw new AppError(404, 'Email does not exists');
-    }
-    
-    const passwordMatch = await bcrypt.compare(password, user.password);
-    
-    if (!passwordMatch) {
-      throw new AppError(422, 'Password did not match');
-    }
+  if (!user) {
+    throw new AppError(404, "Email does not exists");
+  }
 
-    // generate token
-    const payload = {
-        email: email,
-        role: user.role,
-        fullName: user.fullName,
-        userId: user._id,
-    };
+  const passwordMatch = await bcrypt.compare(password, user.password);
 
-    const JWT_SECRET = process.env.JWT_SECRET;
+  if (!passwordMatch) {
+    throw new AppError(422, "Password did not match");
+  }
 
-    if (!JWT_SECRET) {
-        throw new AppError(500, "JWT secret is missing");
-    }
+  // generate token
+  const payload = {
+    email: email,
+    role: user.role,
+    fullName: user.fullName,
+    userId: user._id,
+  };
 
-    const token = jwt.sign(payload, JWT_SECRET, {
-        expiresIn: "1y"
-    });
+  const ACCESS_TOKEN_JWT_SECRET = process.env.ACCESS_TOKEN_JWT_SECRET;
 
-    const userObj = {
-        ...user.toObject(),
-        token: token,
-        password: null,
-    };
+  if (!ACCESS_TOKEN_JWT_SECRET) {
+    throw new AppError(500, "JWT secret is missing");
+  }
+
+  const accessToken = await jwt.sign(payload, ACCESS_TOKEN_JWT_SECRET, {
+    expiresIn: "15min",
+  });
+
+  const REFRESH_TOKEN_JWT_SECRET = process.env.REFRESH_TOKEN_JWT_SECRET;
+
+  if (!REFRESH_TOKEN_JWT_SECRET) {
+    throw new AppError(500, "JWT REFRESH_TOKEN_JWT_SECRET secret is missing");
+  }
+
+  const refreshTokenPayload = {
+    userId: payload.userId,
+  };
+
+  const refreshToken = await jwt.sign(
+    refreshTokenPayload,
+    REFRESH_TOKEN_JWT_SECRET,
+    {
+      expiresIn: "7d",
+    },
+  );
+
+  // redis client
+  const client = getRedisClient();
+
+  // save refresh token in redis
+  await client.set(`session:${payload.userId}`, refreshToken, {
+    EX: 604800,
+  });
+
+  const userObj = {
+    ...user.toObject(),
+    accessToken: accessToken,
+    refreshToken: refreshToken,
+    password: null,
+  };
 
   return userObj;
-}
+};
 
-export const forgotPasswordVerifyOtpService = async (data: IForgotPasswordVerifyOtpData) => {
+export const forgotPasswordVerifyOtpService = async (
+  data: IForgotPasswordVerifyOtpData,
+) => {
   const { email, otp } = data;
 
-  const latestOtp = await Otp.findOne({ email }).sort({ createdAt: -1 });
+  // redis client
+  const latestOtp = await getRedisClient().get(`forgot_password_otp:${email}`);
 
   if (!latestOtp) {
     throw new AppError(422, "Otp not found / expired");
-  } 
+  }
 
-  if (latestOtp.otp != otp) {
+  if (latestOtp != otp) {
     throw new AppError(422, "Otp did not match");
   }
 
-  // generate token 
+  // generate token
   const token = crypto.randomBytes(32).toString("hex");
 
-  const updatedUser = await User.findOneAndUpdate({ email }, {
-    resetToken: token,
-    resetTokenExpiry: Date.now() + 10 * 60 * 1000,
-  }, { returnDocument: 'after' }).select("-password");
+  const updatedUser = await User.findOneAndUpdate(
+    { email },
+    {
+      resetToken: token,
+      resetTokenExpiry: Date.now() + 10 * 60 * 1000,
+    },
+    { returnDocument: "after" },
+  ).select("-password");
 
   return updatedUser;
-}
+};
 
 export const resetPasswordService = async (data: IResetPasswordData) => {
   const { resetToken, password, confirmPassword } = data;
@@ -187,16 +251,18 @@ export const resetPasswordService = async (data: IResetPasswordData) => {
   const hashedPassword = await bcrypt.hash(password, 10);
 
   // update the user
-  const updatedUser = await User.findOneAndUpdate({ resetToken }, {
-    password: hashedPassword,
-    resetToken: '',
-    resetTokenExpiry: '',
-  }, { returnDocument: 'after' });
-
+  const updatedUser = await User.findOneAndUpdate(
+    { resetToken },
+    {
+      password: hashedPassword,
+      resetToken: "",
+      resetTokenExpiry: "",
+    },
+    { returnDocument: "after" },
+  );
 
   return updatedUser;
-
-}
+};
 
 export const updatePasswordService = async (data: IUpdatePassword) => {
   const { userId, password, confirmPassword, oldPassword } = data;
@@ -223,9 +289,13 @@ export const updatePasswordService = async (data: IUpdatePassword) => {
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const updatedUser = await User.findOneAndUpdate({ _id: userId }, {
-    password: hashedPassword
-  }, { 'returnDocument': 'after' }).select("-password");
+  const updatedUser = await User.findOneAndUpdate(
+    { _id: userId },
+    {
+      password: hashedPassword,
+    },
+    { returnDocument: "after" },
+  ).select("-password");
 
   return updatedUser?.toObject();
-}
+};

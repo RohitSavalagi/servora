@@ -2,10 +2,13 @@ import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import proxy from "express-http-proxy";
 import { loginValidation } from "./auth.middleware";
+import cookieParser from "cookie-parser";
 
 const app = express();
 dotenv.config();
 const PORT = process.env.PORT;
+
+app.use(cookieParser());
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Api Gateway is running");
@@ -13,17 +16,17 @@ app.get("/", (req: Request, res: Response) => {
 
 const authProxy = proxy("http://localhost:3001", {
   proxyReqPathResolver: (req) => {
-    return req.originalUrl.replace("/api/v1/auth", "")
+    return req.originalUrl.replace("/api/v1/auth", "");
   },
 
   proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
     if (srcReq.user) {
-      proxyReqOpts.headers['user_id'] = JSON.stringify(srcReq.user);
+      proxyReqOpts.headers["user_id"] = JSON.stringify(srcReq.user);
     }
 
     return proxyReqOpts;
-  }
-})
+  },
+});
 
 // Public routes
 app.use("/api/v1/auth/send-mail-auth", authProxy);
